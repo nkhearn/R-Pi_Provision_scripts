@@ -9,7 +9,7 @@ echo " Termux Native Offline Image Builder"
 echo "=========================================================="
 echo ""
 
-# Ensure required packages are installed
+# Ensure required core packages are installed
 for cmd in mcopy fdisk openssl; do
     if ! command -v $cmd &> /dev/null; then
         echo "Error: Required command '$cmd' not found."
@@ -17,6 +17,42 @@ for cmd in mcopy fdisk openssl; do
         exit 1
     fi
 done
+
+# ---------------------------------------------------------
+# Phase 0: Dependency Checks (PV and Whiptail)
+# ---------------------------------------------------------
+USE_PROGRESS_UI=false
+MISSING_TOOLS=()
+
+if ! command -v pv &>/dev/null; then
+    MISSING_TOOLS+=("pv")
+fi
+if ! command -v whiptail &>/dev/null; then
+    MISSING_TOOLS+=("whiptail")
+fi
+
+if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
+    echo "Optional progress indicator dependencies missing: ${MISSING_TOOLS[*]}"
+    read -p "Would you like to try installing them now via package manager? [y/N]: " INSTALL_TOOLS
+    if [[ "$INSTALL_TOOLS" =~ ^[Yy] ]]; then
+        echo "Attempting to install ${MISSING_TOOLS[*]}..."
+        if command -v pkg &>/dev/null; then
+            pkg install -y "${MISSING_TOOLS[@]}" || true
+        elif command -v apt-get &>/dev/null; then
+            apt-get update && apt-get install -y "${MISSING_TOOLS[@]}" || true
+        else
+            echo "Package manager not recognized. Skipping automatic installation."
+        fi
+    fi
+fi
+
+if command -v pv &>/dev/null && command -v whiptail &>/dev/null; then
+    USE_PROGRESS_UI=true
+    echo "Progress indicators enabled (pv + whiptail)."
+else
+    echo "Falling back to standard output / simple progress logs."
+fi
+echo ""
 
 # ---------------------------------------------------------
 # Phase 1: Output & Temp Setup
@@ -124,13 +160,36 @@ if [ "$IMG_CHOICE" -eq 1 ] || [ "$IMG_CHOICE" -eq 2 ]; then
     DOWNLOAD_DIR="$PWD/pi_downloads"
     mkdir -p "$DOWNLOAD_DIR"
     echo "Downloading to $DOWNLOAD_DIR..."
-    wget -q --show-progress --trust-server-names -P "$DOWNLOAD_DIR" "$URL"
-    IMG_PATH=$(ls -t "$DOWNLOAD_DIR"/*.xz | head -n 1)
+    if [ "$USE_PROGRESS_UI" = true ]; then
+        REMOTE_HEADERS=$(wget --spider --server-response "$URL" 2>&1)
+        REDIRECT_URL=$(echo "$REMOTE_HEADERS" | grep -i "Location:" | tail -n 1 | awk '{print $2}' | tr -d '\r')
+        if [ -n "$REDIRECT_URL" ]; then
+            FILE_NAME=$(basename "$REDIRECT_URL" | cut -d'?' -f1)
+        else
+            FILE_NAME="pi_os_image.xz"
+        fi
+        CONTENT_LENGTH=$(echo "$REMOTE_HEADERS" | grep -i "Content-Length:" | tail -n 1 | awk '{print $2}' | tr -d '\r')
+
+        OUT_FILE="$DOWNLOAD_DIR/$FILE_NAME"
+        if [ -n "$CONTENT_LENGTH" ] && [[ "$CONTENT_LENGTH" =~ ^[0-9]+$ ]]; then
+            ( wget -qO- "$URL" | pv -n -s "$CONTENT_LENGTH" > "$OUT_FILE" ) 2>&1 | whiptail --gauge "Downloading Raspberry Pi OS image..." 6 60 0
+        else
+            ( wget -qO- "$URL" | pv -n > "$OUT_FILE" ) 2>&1 | whiptail --gauge "Downloading Raspberry Pi OS image..." 6 60 0
+        fi
+        IMG_PATH="$OUT_FILE"
+    else
+        wget -q --show-progress --trust-server-names -P "$DOWNLOAD_DIR" "$URL"
+        IMG_PATH=$(ls -t "$DOWNLOAD_DIR"/*.xz | head -n 1)
+    fi
 fi
 
 echo ""
 echo "Extracting $IMG_PATH to $OUTPUT_IMG..."
-xzcat "$IMG_PATH" > "$OUTPUT_IMG"
+if [ "$USE_PROGRESS_UI" = true ]; then
+    ( pv -n "$IMG_PATH" | xzcat > "$OUTPUT_IMG" ) 2>&1 | whiptail --gauge "Extracting base image..." 6 60 0
+else
+    xzcat "$IMG_PATH" > "$OUTPUT_IMG"
+fi
 
 # ---------------------------------------------------------
 # Phase 4: Generate Configuration Files Locally
@@ -325,8 +384,18 @@ if [[ "$EXPORT_DOWNLOADS" =~ ^[Yy] ]]; then
 
     if [ -n "$DEST_DIR" ]; then
         echo "Copying $OUTPUT_IMG to $DEST_DIR..."
-        cp "$OUTPUT_IMG" "$DEST_DIR/"
-        echo "Copied image to $DEST_DIR/$(basename "$OUTPUT_IMG")"
+        DEST_FILE="$DEST_DIR/$(basename "$OUTPUT_IMG")"
+        if [ "$USE_PROGRESS_UI" = true ]; then
+            IMG_SIZE=$(stat -c%s "$OUTPUT_IMG" 2>/dev/null || echo "")
+            if [ -n "$IMG_SIZE" ] && [[ "$IMG_SIZE" =~ ^[0-9]+$ ]]; then
+                ( pv -n -s "$IMG_SIZE" "$OUTPUT_IMG" > "$DEST_FILE" ) 2>&1 | whiptail --gauge "Exporting image to Downloads..." 6 60 0
+            else
+                ( pv -n "$OUTPUT_IMG" > "$DEST_FILE" ) 2>&1 | whiptail --gauge "Exporting image to Downloads..." 6 60 0
+            fi
+        else
+            cp "$OUTPUT_IMG" "$DEST_DIR/"
+        fi
+        echo "Copied image to $DEST_FILE"
     else
         echo "Warning: Android Download directory (~/storage/downloads or /sdcard/Download) not accessible."
         echo "Run 'termux-setup-storage' to grant storage permission if needed."
