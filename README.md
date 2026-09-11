@@ -20,12 +20,12 @@ All three scripts inject a comprehensive headless configuration into the Raspber
 
 ### 1. `pi_prov_direct.sh` (Direct to Drive)
 **Best for:** Standard Linux desktop/server users with an SD card or USB drive plugged in.
-* **How it works:** Downloads or uses a local `.xz` Pi OS image, extracts it, and writes it directly to the target block device (e.g., `/dev/sda`). It verifies safety to prevent accidentally overwriting the host root system drive, natively mounts boot and root partitions to inject configurations, safely unmounts, and ejects the target drive.
+* **How it works:** Downloads or uses a local `.xz` Pi OS image, extracts it, and writes it directly to the target block device (e.g., `/dev/sda`). It verifies safety to prevent accidentally overwriting the host root system drive, unmounts any existing auto-mounted or active mount points on the target device, refreshes kernel partition tables via `partprobe` and `udevadm settle`, mounts boot and root partitions directly to `/tmp` (`/tmp/pi_boot` and `/tmp/pi_root`) to inject configurations, safely unmounts, and ejects the target drive.
 * **Requirements:** A Linux environment with `sudo` privileges.
 
 ### 2. `pi_prov_image.sh` (Offline Image Builder)
 **Best for:** Creating reusable, pre-configured `.img` files on a Linux machine to flash later.
-* **How it works:** Extracts the source `.xz` image to a raw `.img` file. It uses Linux loopback devices (`losetup`) and `partprobe` to mount the image's internal partitions. It injects configurations (including hostname and Wi-Fi country code), detaches loop devices, and optionally compresses the final image with `xz`.
+* **How it works:** Extracts the source `.xz` image to a raw `.img` file. It uses Linux loopback devices (`losetup`) and `partprobe` to attach the image, unmounts any existing `/tmp` mount points, and mounts the image's internal partitions directly to `/tmp` (`/tmp/pi_img_boot` and `/tmp/pi_img_root`). It injects configurations (including hostname and Wi-Fi country code), detaches loop devices, and optionally compresses the final image with `xz`.
 * **Requirements:** A Linux environment with `sudo` privileges and loopback kernel module support.
 
 ### 3. `pi_prov_image_tmx.sh` (Termux / Unrooted Android Native)

@@ -159,6 +159,9 @@ PART_ROOT="${LOOP_DEV}p2"
 MNT_BOOT="/tmp/pi_img_boot"
 MNT_ROOT="/tmp/pi_img_root"
 
+sudo umount "$MNT_BOOT" 2>/dev/null || true
+sudo umount "$MNT_ROOT" 2>/dev/null || true
+
 sudo mkdir -p "$MNT_BOOT" "$MNT_ROOT"
 sudo mount "$PART_BOOT" "$MNT_BOOT"
 sudo mount "$PART_ROOT" "$MNT_ROOT"
