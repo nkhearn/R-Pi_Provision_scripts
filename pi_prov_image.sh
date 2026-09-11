@@ -1,6 +1,6 @@
 #!/bin/bash
 # Raspberry Pi 5 Offline Image Builder (Debian Trixie)
-# Features: Local Image Scan, Loopback Mounting, Config Injection, VNC Enablement
+# Features: Local Image Scan, Loopback Mounting, Config Injection, Optional VNC Enablement
 
 set -e
 
@@ -46,6 +46,8 @@ fi
 if [ -z "$SSH_PUB_KEY" ]; then
     read -p "Paste SSH Public Key (optional, leave blank to skip): " SSH_PUB_KEY
 fi
+
+read -p "Enable VNC service on first boot? [y/N]: " ENABLE_VNC
 
 echo ""
 echo "--- Wi-Fi Networks ---"
@@ -300,11 +302,9 @@ if [ -n "$SSH_PUB_KEY" ]; then
     sudo chown -R 1000:1000 "$MNT_ROOT/home/$RPI_USER"
 fi
 
-# 6. First-Boot VNC Enablement
-# Because Pi OS manages VNC configurations via raspi-config dynamically based on 
-# whether Wayland/WayVNC or X11/RealVNC is running, the safest offline method 
-# is to trigger raspi-config natively on the very first boot.
-sudo tee "$MNT_ROOT/etc/systemd/system/first-boot-vnc.service" > /dev/null <<'EOF'
+# 6. First-Boot VNC Enablement (Optional)
+if [[ "$ENABLE_VNC" =~ ^[Yy] ]]; then
+    sudo tee "$MNT_ROOT/etc/systemd/system/first-boot-vnc.service" > /dev/null <<'EOF'
 [Unit]
 Description=Enable VNC on First Boot
 After=multi-user.target
@@ -318,8 +318,9 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
 EOF
-sudo ln -sf "/etc/systemd/system/first-boot-vnc.service" "$MNT_ROOT/etc/systemd/system/multi-user.target.wants/first-boot-vnc.service"
-echo "Injected first-boot script to natively enable VNC service."
+    sudo ln -sf "/etc/systemd/system/first-boot-vnc.service" "$MNT_ROOT/etc/systemd/system/multi-user.target.wants/first-boot-vnc.service"
+    echo "Injected first-boot script to natively enable VNC service."
+fi
 
 # ---------------------------------------------------------
 # Phase 6: Cleanup & Unmount

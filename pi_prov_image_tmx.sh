@@ -50,10 +50,15 @@ SSH_PUB_KEY=""
 if [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
     read -p "Found SSH key in ~/.ssh/id_ed25519.pub. Inject it? [Y/n]: " USE_KEY
     if [[ ! "$USE_KEY" =~ ^[Nn] ]]; then SSH_PUB_KEY=$(cat "$HOME/.ssh/id_ed25519.pub"); fi
+elif [ -f "$HOME/.ssh/id_rsa.pub" ]; then
+    read -p "Found SSH key in ~/.ssh/id_rsa.pub. Inject it? [Y/n]: " USE_KEY
+    if [[ ! "$USE_KEY" =~ ^[Nn] ]]; then SSH_PUB_KEY=$(cat "$HOME/.ssh/id_rsa.pub"); fi
 fi
 if [ -z "$SSH_PUB_KEY" ]; then
     read -p "Paste SSH Public Key (optional, leave blank to skip): " SSH_PUB_KEY
 fi
+
+read -p "Enable VNC service on first boot? [y/N]: " ENABLE_VNC
 
 echo ""
 echo "--- Wi-Fi Networks ---"
@@ -227,10 +232,15 @@ WantedBy=multi-user.target
 INNER_EOF
 ln -sf /etc/systemd/system/network-fallback.service /etc/systemd/system/multi-user.target.wants/network-fallback.service
 
+EOF
+
+if [[ "$ENABLE_VNC" =~ ^[Yy] ]]; then
+    cat << 'EOF' >> "$TMP_DIR/firstrun.sh"
 # Enable VNC Server
 raspi-config nonint do_vnc 0
 
 EOF
+fi
 
 # Append dynamic variables to the script
 cat << EOF >> "$TMP_DIR/firstrun.sh"
@@ -238,9 +248,11 @@ cat << EOF >> "$TMP_DIR/firstrun.sh"
 USER_HOME="/home/$RPI_USER"
 mkdir -p "\$USER_HOME/.ssh"
 mv /boot/firmware/injected_authorized_keys "\$USER_HOME/.ssh/authorized_keys" 2>/dev/null || mv /boot/injected_authorized_keys "\$USER_HOME/.ssh/authorized_keys" 2>/dev/null
-chmod 700 "\$USER_HOME/.ssh"
-chmod 600 "\$USER_HOME/.ssh/authorized_keys"
-chown -R 1000:1000 "\$USER_HOME"
+if [ -f "\$USER_HOME/.ssh/authorized_keys" ]; then
+    chmod 700 "\$USER_HOME/.ssh"
+    chmod 600 "\$USER_HOME/.ssh/authorized_keys"
+    chown -R 1000:1000 "\$USER_HOME"
+fi
 
 # Restore cmdline.txt and self-destruct
 mv /boot/firmware/cmdline.bak /boot/firmware/cmdline.txt 2>/dev/null || mv /boot/cmdline.bak /boot/cmdline.txt 2>/dev/null
