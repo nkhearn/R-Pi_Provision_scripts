@@ -163,10 +163,8 @@ if [[ "$MODE" =~ ^[Ww] ]]; then
     echo "Writing image to $TARGET_PATH..."
     xzcat "$IMG_PATH" | sudo dd of="$TARGET_PATH" bs=4M status=progress conv=fsync
 
-    echo "Probing partitions to refresh kernel tables..."
-    sudo partprobe "$TARGET_PATH"
-    echo "Waiting for desktop auto-mounter to settle..."
-    sleep 5
+    echo "Waiting for partition table writing to settle..."
+    sleep 2
 fi
 
 # ---------------------------------------------------------
@@ -183,12 +181,20 @@ fi
 echo ""
 echo "--- Preparing Partitions ---"
 
-# Unmount auto-mounted partitions to ensure clean mount points
-sudo umount "$PART_BOOT" 2>/dev/null || true
-sudo umount "$PART_ROOT" 2>/dev/null || true
-
 MNT_BOOT="/tmp/pi_boot"
 MNT_ROOT="/tmp/pi_root"
+
+# Unmount any existing auto-mounted or active partitions on target device
+echo "Unmounting any existing mount points on $TARGET_PATH..."
+sudo umount "${TARGET_PATH}"* 2>/dev/null || true
+sudo umount "$MNT_BOOT" 2>/dev/null || true
+sudo umount "$MNT_ROOT" 2>/dev/null || true
+
+# Refresh partition table cleanly now that device is unmounted
+echo "Probing partition table on $TARGET_PATH..."
+sudo partprobe "$TARGET_PATH" 2>/dev/null || true
+sudo udevadm settle 2>/dev/null || true
+sleep 1
 
 sudo mkdir -p "$MNT_BOOT" "$MNT_ROOT"
 
