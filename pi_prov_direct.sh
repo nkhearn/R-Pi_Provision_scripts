@@ -157,6 +157,9 @@ if [[ "$MODE" =~ ^[Ww] ]]; then
         IMG_PATH=$(ls -t "$DOWNLOAD_DIR"/*.xz | head -n 1)
     fi
 
+    echo "Unmounting any active partition mounts on $TARGET_PATH..."
+    sudo umount "${TARGET_PATH}"* 2>/dev/null || true
+
     echo "Writing image to $TARGET_PATH..."
     xzcat "$IMG_PATH" | sudo dd of="$TARGET_PATH" bs=4M status=progress conv=fsync
 
@@ -167,7 +170,7 @@ if [[ "$MODE" =~ ^[Ww] ]]; then
 fi
 
 # ---------------------------------------------------------
-# Phase 5: Dynamic Partition Mounting
+# Phase 5: Partition Mounting
 # ---------------------------------------------------------
 if [[ "$TARGET_DEV" =~ [0-9]$ ]]; then
     PART_BOOT="${TARGET_PATH}p1"
@@ -178,30 +181,22 @@ else
 fi
 
 echo ""
-echo "--- Locating Partitions ---"
+echo "--- Preparing Partitions ---"
 
-MOUNTED_BOOT=$(findmnt -n -o TARGET "$PART_BOOT" || true)
-MOUNTED_ROOT=$(findmnt -n -o TARGET "$PART_ROOT" || true)
+# Unmount auto-mounted partitions to ensure clean mount points
+sudo umount "$PART_BOOT" 2>/dev/null || true
+sudo umount "$PART_ROOT" 2>/dev/null || true
 
-if [ -n "$MOUNTED_BOOT" ]; then
-    MNT_BOOT="$MOUNTED_BOOT"
-    echo "Boot partition already mounted at: $MNT_BOOT"
-else
-    MNT_BOOT="/tmp/pi_boot"
-    sudo mkdir -p "$MNT_BOOT"
-    sudo mount "$PART_BOOT" "$MNT_BOOT"
-    echo "Boot partition manually mounted to: $MNT_BOOT"
-fi
+MNT_BOOT="/tmp/pi_boot"
+MNT_ROOT="/tmp/pi_root"
 
-if [ -n "$MOUNTED_ROOT" ]; then
-    MNT_ROOT="$MOUNTED_ROOT"
-    echo "Root partition already mounted at: $MNT_ROOT"
-else
-    MNT_ROOT="/tmp/pi_root"
-    sudo mkdir -p "$MNT_ROOT"
-    sudo mount "$PART_ROOT" "$MNT_ROOT"
-    echo "Root partition manually mounted to: $MNT_ROOT"
-fi
+sudo mkdir -p "$MNT_BOOT" "$MNT_ROOT"
+
+sudo mount "$PART_BOOT" "$MNT_BOOT"
+echo "Boot partition mounted to: $MNT_BOOT"
+
+sudo mount "$PART_ROOT" "$MNT_ROOT"
+echo "Root partition mounted to: $MNT_ROOT"
 
 # ---------------------------------------------------------
 # Phase 6: Configuration Injection
