@@ -1,6 +1,6 @@
 #!/bin/bash
 # Raspberry Pi 5 (64-bit) Master Provisioner
-# Features: Write Skip, Local Image Scan, Multiple Wi-Fi, Fallback Hotspot, Dynamic Mounts, RFKill Fix
+# Features: Write Skip, Local Image Scan, Multiple Wi-Fi, Fallback Hotspot, Dynamic Mounts, RFKill Fix, Optional VNC Enablement
 
 set -e
 
@@ -38,6 +38,8 @@ fi
 if [ -z "$SSH_PUB_KEY" ]; then
     read -p "Paste SSH Public Key (optional, leave blank to skip): " SSH_PUB_KEY
 fi
+
+read -p "Enable VNC service on first boot? [y/N]: " ENABLE_VNC
 
 echo ""
 echo "--- Wi-Fi Networks ---"
@@ -135,7 +137,7 @@ if [[ "$MODE" =~ ^[Ww] ]]; then
     esac
 
     if [ "$IMG_CHOICE" -eq 1 ] || [ "$IMG_CHOICE" -eq 2 ]; then
-        DOWNLOAD_DIR="$HOME/mnt/usb"
+        DOWNLOAD_DIR="$PWD/pi_downloads"
         mkdir -p "$DOWNLOAD_DIR"
         echo "Downloading to $DOWNLOAD_DIR..."
         wget -q --show-progress --trust-server-names -P "$DOWNLOAD_DIR" "$URL"
@@ -258,29 +260,6 @@ EOF
     echo "Injected Wi-Fi: $SSID (Priority $PRIO)"
 done
 
-UUID_OPEN=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen)
-sudo tee "$NM_DIR/Fallback-Open-WiFi.nmconnection" > /dev/null <<EOF
-[connection]
-id=Fallback-Open-WiFi
-uuid=$UUID_OPEN
-type=wifi
-autoconnect=true
-autoconnect-priority=5
-
-[wifi]
-mode=infrastructure
-
-[wifi-security]
-key-mgmt=none
-
-[ipv4]
-method=auto
-
-[ipv6]
-method=auto
-EOF
-sudo chmod 600 "$NM_DIR/Fallback-Open-WiFi.nmconnection"
-
 UUID_HOTSPOT=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen)
 sudo tee "$NM_DIR/Fallback-Hotspot.nmconnection" > /dev/null <<EOF
 [connection]
@@ -353,6 +332,25 @@ if [ -n "$SSH_PUB_KEY" ]; then
     sudo chmod 700 "$MNT_ROOT/home/$RPI_USER/.ssh"
     sudo chmod 600 "$MNT_ROOT/home/$RPI_USER/.ssh/authorized_keys"
     sudo chown -R 1000:1000 "$MNT_ROOT/home/$RPI_USER"
+fi
+
+if [[ "$ENABLE_VNC" =~ ^[Yy] ]]; then
+    sudo tee "$MNT_ROOT/etc/systemd/system/first-boot-vnc.service" > /dev/null <<'EOF'
+[Unit]
+Description=Enable VNC on First Boot
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/raspi-config nonint do_vnc 0
+ExecStartPost=/bin/systemctl disable first-boot-vnc.service
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    sudo ln -sf "/etc/systemd/system/first-boot-vnc.service" "$MNT_ROOT/etc/systemd/system/multi-user.target.wants/first-boot-vnc.service"
+    echo "Injected first-boot script to natively enable VNC service."
 fi
 
 # ---------------------------------------------------------
