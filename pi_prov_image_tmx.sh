@@ -45,6 +45,8 @@ echo "--- General Configuration ---"
 read -p "New Raspberry Pi Username: " RPI_USER
 read -s -p "New Password: " RPI_PASS
 echo ""
+read -p "New Raspberry Pi Hostname [Default: raspberrypi]: " RPI_HOSTNAME
+RPI_HOSTNAME="${RPI_HOSTNAME:-raspberrypi}"
 
 SSH_PUB_KEY=""
 if [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
@@ -59,6 +61,12 @@ if [ -z "$SSH_PUB_KEY" ]; then
 fi
 
 read -p "Enable VNC service on first boot? [y/N]: " ENABLE_VNC
+
+read -p "Wi-Fi Country Code [Default: GB]: " WIFI_COUNTRY
+WIFI_COUNTRY="${WIFI_COUNTRY:-GB}"
+WIFI_COUNTRY=$(echo "$WIFI_COUNTRY" | tr '[:lower:]' '[:upper:]')
+
+read -p "Copy final image to Android Download folder (~/storage/downloads)? [y/N]: " EXPORT_DOWNLOADS
 
 echo ""
 echo "--- Wi-Fi Networks ---"
@@ -234,6 +242,24 @@ ln -sf /etc/systemd/system/network-fallback.service /etc/systemd/system/multi-us
 
 EOF
 
+# Inject Hostname and Wi-Fi Country configuration into firstrun.sh
+cat << EOF >> "$TMP_DIR/firstrun.sh"
+# Configure Hostname
+echo "$RPI_HOSTNAME" > /etc/hostname
+if [ -f /etc/hosts ]; then
+    sed -i "s/127\.0\.1\.1.*/127.0.1.1\t$RPI_HOSTNAME/g" /etc/hosts
+fi
+
+# Configure Wi-Fi Country Code
+mkdir -p /etc/wpa_supplicant
+cat << WPA_EOF > /etc/wpa_supplicant/wpa_supplicant.conf
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+country=$WIFI_COUNTRY
+WPA_EOF
+rm -f /var/lib/systemd/rfkill/* 2>/dev/null
+EOF
+
 if [[ "$ENABLE_VNC" =~ ^[Yy] ]]; then
     cat << 'EOF' >> "$TMP_DIR/firstrun.sh"
 # Enable VNC Server
@@ -288,6 +314,24 @@ sed -i 's/$/ systemd.run=\/boot\/firmware\/firstrun.sh systemd.run_success_actio
 
 mcopy -o -i "$OUTPUT_IMG@@$OFFSET" "$TMP_DIR/cmdline.bak" ::/
 mcopy -o -i "$OUTPUT_IMG@@$OFFSET" "$TMP_DIR/cmdline.txt" ::/
+
+if [[ "$EXPORT_DOWNLOADS" =~ ^[Yy] ]]; then
+    DEST_DIR=""
+    if [ -d "$HOME/storage/downloads" ]; then
+        DEST_DIR="$HOME/storage/downloads"
+    elif [ -d "/sdcard/Download" ]; then
+        DEST_DIR="/sdcard/Download"
+    fi
+
+    if [ -n "$DEST_DIR" ]; then
+        echo "Copying $OUTPUT_IMG to $DEST_DIR..."
+        cp "$OUTPUT_IMG" "$DEST_DIR/"
+        echo "Copied image to $DEST_DIR/$(basename "$OUTPUT_IMG")"
+    else
+        echo "Warning: Android Download directory (~/storage/downloads or /sdcard/Download) not accessible."
+        echo "Run 'termux-setup-storage' to grant storage permission if needed."
+    fi
+fi
 
 echo "=========================================================="
 echo "✅ Success! Your custom Termux image is ready: $OUTPUT_IMG"

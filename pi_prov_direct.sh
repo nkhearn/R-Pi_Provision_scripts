@@ -26,6 +26,8 @@ echo "--- General Configuration ---"
 read -p "New Raspberry Pi Username: " RPI_USER
 read -s -p "New Password: " RPI_PASS
 echo ""
+read -p "New Raspberry Pi Hostname [Default: raspberrypi]: " RPI_HOSTNAME
+RPI_HOSTNAME="${RPI_HOSTNAME:-raspberrypi}"
 
 SSH_PUB_KEY=""
 if [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
@@ -40,6 +42,10 @@ if [ -z "$SSH_PUB_KEY" ]; then
 fi
 
 read -p "Enable VNC service on first boot? [y/N]: " ENABLE_VNC
+
+read -p "Wi-Fi Country Code [Default: GB]: " WIFI_COUNTRY
+WIFI_COUNTRY="${WIFI_COUNTRY:-GB}"
+WIFI_COUNTRY=$(echo "$WIFI_COUNTRY" | tr '[:lower:]' '[:upper:]')
 
 echo ""
 echo "--- Wi-Fi Networks ---"
@@ -74,6 +80,13 @@ TARGET_PATH="/dev/$TARGET_DEV"
 
 if [ ! -b "$TARGET_PATH" ]; then
     echo "Error: $TARGET_PATH is not a valid block device."
+    exit 1
+fi
+
+# Safety check: Prevent overwriting root disk or system drives
+ROOT_DEV=$(findmnt -n -o SOURCE / | sed 's/[0-9]*$//')
+if findmnt -n -o TARGET | grep -q -E "^/$" && [ "$(lsblk -no PKNAME "$ROOT_DEV" 2>/dev/null || echo "$ROOT_DEV")" = "$TARGET_DEV" ] || [ "/dev/$TARGET_DEV" = "$ROOT_DEV" ]; then
+    echo "Error: $TARGET_PATH appears to be the system root disk! Aborting for safety."
     exit 1
 fi
 
@@ -317,14 +330,21 @@ EOF
 sudo mkdir -p "$MNT_ROOT/etc/systemd/system/multi-user.target.wants"
 sudo ln -sf "/etc/systemd/system/network-fallback.service" "$MNT_ROOT/etc/systemd/system/multi-user.target.wants/network-fallback.service"
 
+# Hostname configuration
+echo "$RPI_HOSTNAME" | sudo tee "$MNT_ROOT/etc/hostname" > /dev/null
+if [ -f "$MNT_ROOT/etc/hosts" ]; then
+    sudo sed -i "s/127\.0\.1\.1.*/127.0.1.1\t$RPI_HOSTNAME/g" "$MNT_ROOT/etc/hosts"
+fi
+echo "Hostname configured as: $RPI_HOSTNAME"
+
 sudo mkdir -p "$MNT_ROOT/etc/wpa_supplicant"
 sudo tee "$MNT_ROOT/etc/wpa_supplicant/wpa_supplicant.conf" > /dev/null <<EOF
 ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
 update_config=1
-country=GB
+country=$WIFI_COUNTRY
 EOF
 sudo rm -f "$MNT_ROOT/var/lib/systemd/rfkill/"*
-echo "Wi-Fi soft-block cleared and country code set to GB."
+echo "Wi-Fi soft-block cleared and country code set to $WIFI_COUNTRY."
 
 if [ -n "$SSH_PUB_KEY" ]; then
     sudo mkdir -p "$MNT_ROOT/home/$RPI_USER/.ssh"
@@ -362,6 +382,8 @@ sync
 
 sudo umount "$MNT_BOOT" || true
 sudo umount "$MNT_ROOT" || true
+
+sudo eject "$TARGET_PATH" 2>/dev/null || true
 
 echo "=========================================================="
 echo "✅ Success! The drive is provisioned and cleanly unmounted."
