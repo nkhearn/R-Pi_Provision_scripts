@@ -10,6 +10,46 @@ echo "=========================================================="
 echo ""
 
 # ---------------------------------------------------------
+# Phase 0: Dependency Checks (PV and Whiptail)
+# ---------------------------------------------------------
+USE_PROGRESS_UI=false
+MISSING_TOOLS=()
+
+if ! command -v pv &>/dev/null; then
+    MISSING_TOOLS+=("pv")
+fi
+if ! command -v whiptail &>/dev/null; then
+    MISSING_TOOLS+=("whiptail")
+fi
+
+if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
+    echo "Optional progress indicator dependencies missing: ${MISSING_TOOLS[*]}"
+    read -p "Would you like to try installing them now via package manager? [y/N]: " INSTALL_TOOLS
+    if [[ "$INSTALL_TOOLS" =~ ^[Yy] ]]; then
+        echo "Attempting to install ${MISSING_TOOLS[*]}..."
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get update && sudo apt-get install -y "${MISSING_TOOLS[@]}" || true
+        elif command -v pkg &>/dev/null; then
+            pkg install -y "${MISSING_TOOLS[@]}" || true
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y "${MISSING_TOOLS[@]}" || true
+        elif command -v pacman &>/dev/null; then
+            sudo pacman -S --noconfirm "${MISSING_TOOLS[@]}" || true
+        else
+            echo "Package manager not recognized. Skipping automatic installation."
+        fi
+    fi
+fi
+
+if command -v pv &>/dev/null && command -v whiptail &>/dev/null; then
+    USE_PROGRESS_UI=true
+    echo "Progress indicators enabled (pv + whiptail)."
+else
+    echo "Falling back to standard output / simple progress logs."
+fi
+echo ""
+
+# ---------------------------------------------------------
 # Phase 1: Output File Selection
 # ---------------------------------------------------------
 read -p "Enter desired output image name (e.g. custom-pi5.img): " OUTPUT_IMG
@@ -131,8 +171,27 @@ if [ "$IMG_CHOICE" -eq 1 ] || [ "$IMG_CHOICE" -eq 2 ]; then
     DOWNLOAD_DIR="$PWD/pi_downloads"
     mkdir -p "$DOWNLOAD_DIR"
     echo "Downloading to $DOWNLOAD_DIR..."
-    wget -q --show-progress --trust-server-names -P "$DOWNLOAD_DIR" "$URL"
-    IMG_PATH=$(ls -t "$DOWNLOAD_DIR"/*.xz | head -n 1)
+    if [ "$USE_PROGRESS_UI" = true ]; then
+        REMOTE_HEADERS=$(wget --spider --server-response "$URL" 2>&1)
+        REDIRECT_URL=$(echo "$REMOTE_HEADERS" | grep -i "Location:" | tail -n 1 | awk '{print $2}' | tr -d '\r')
+        if [ -n "$REDIRECT_URL" ]; then
+            FILE_NAME=$(basename "$REDIRECT_URL" | cut -d'?' -f1)
+        else
+            FILE_NAME="pi_os_image.xz"
+        fi
+        CONTENT_LENGTH=$(echo "$REMOTE_HEADERS" | grep -i "Content-Length:" | tail -n 1 | awk '{print $2}' | tr -d '\r')
+
+        OUT_FILE="$DOWNLOAD_DIR/$FILE_NAME"
+        if [ -n "$CONTENT_LENGTH" ] && [[ "$CONTENT_LENGTH" =~ ^[0-9]+$ ]]; then
+            ( wget -qO- "$URL" | pv -n -s "$CONTENT_LENGTH" > "$OUT_FILE" ) 2>&1 | whiptail --gauge "Downloading Raspberry Pi OS image..." 6 60 0
+        else
+            ( wget -qO- "$URL" | pv -n > "$OUT_FILE" ) 2>&1 | whiptail --gauge "Downloading Raspberry Pi OS image..." 6 60 0
+        fi
+        IMG_PATH="$OUT_FILE"
+    else
+        wget -q --show-progress --trust-server-names -P "$DOWNLOAD_DIR" "$URL"
+        IMG_PATH=$(ls -t "$DOWNLOAD_DIR"/*.xz | head -n 1)
+    fi
 fi
 
 # ---------------------------------------------------------
@@ -140,7 +199,11 @@ fi
 # ---------------------------------------------------------
 echo ""
 echo "Extracting $IMG_PATH to $OUTPUT_IMG..."
-xzcat "$IMG_PATH" > "$OUTPUT_IMG"
+if [ "$USE_PROGRESS_UI" = true ]; then
+    ( pv -n "$IMG_PATH" | xzcat > "$OUTPUT_IMG" ) 2>&1 | whiptail --gauge "Extracting base image..." 6 60 0
+else
+    xzcat "$IMG_PATH" > "$OUTPUT_IMG"
+fi
 
 echo "Attaching $OUTPUT_IMG to loop device..."
 LOOP_DEV=$(sudo losetup -P -f --show "$OUTPUT_IMG")
@@ -354,8 +417,20 @@ sudo losetup -d "$LOOP_DEV" || true
 if [[ "$COMPRESS_IMG" =~ ^[Yy] ]]; then
     echo ""
     echo "Compressing $OUTPUT_IMG with xz..."
-    xz -z -f -T0 "$OUTPUT_IMG"
-    OUTPUT_IMG="${OUTPUT_IMG}.xz"
+    if [ "$USE_PROGRESS_UI" = true ]; then
+        IMG_SIZE=$(stat -c%s "$OUTPUT_IMG" 2>/dev/null || echo "")
+        COMPRESSED_OUT="${OUTPUT_IMG}.xz"
+        if [ -n "$IMG_SIZE" ] && [[ "$IMG_SIZE" =~ ^[0-9]+$ ]]; then
+            ( pv -n -s "$IMG_SIZE" "$OUTPUT_IMG" | xz -z -c -T0 > "$COMPRESSED_OUT" ) 2>&1 | whiptail --gauge "Compressing output image with xz..." 6 60 0
+        else
+            ( pv -n "$OUTPUT_IMG" | xz -z -c -T0 > "$COMPRESSED_OUT" ) 2>&1 | whiptail --gauge "Compressing output image with xz..." 6 60 0
+        fi
+        rm -f "$OUTPUT_IMG"
+        OUTPUT_IMG="$COMPRESSED_OUT"
+    else
+        xz -z -f -T0 "$OUTPUT_IMG"
+        OUTPUT_IMG="${OUTPUT_IMG}.xz"
+    fi
 fi
 
 echo "=========================================================="

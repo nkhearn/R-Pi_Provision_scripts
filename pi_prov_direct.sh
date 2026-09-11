@@ -10,6 +10,46 @@ echo "=========================================================="
 echo ""
 
 # ---------------------------------------------------------
+# Phase 0: Dependency Checks (PV and Whiptail)
+# ---------------------------------------------------------
+USE_PROGRESS_UI=false
+MISSING_TOOLS=()
+
+if ! command -v pv &>/dev/null; then
+    MISSING_TOOLS+=("pv")
+fi
+if ! command -v whiptail &>/dev/null; then
+    MISSING_TOOLS+=("whiptail")
+fi
+
+if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
+    echo "Optional progress indicator dependencies missing: ${MISSING_TOOLS[*]}"
+    read -p "Would you like to try installing them now via package manager? [y/N]: " INSTALL_TOOLS
+    if [[ "$INSTALL_TOOLS" =~ ^[Yy] ]]; then
+        echo "Attempting to install ${MISSING_TOOLS[*]}..."
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get update && sudo apt-get install -y "${MISSING_TOOLS[@]}" || true
+        elif command -v pkg &>/dev/null; then
+            pkg install -y "${MISSING_TOOLS[@]}" || true
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y "${MISSING_TOOLS[@]}" || true
+        elif command -v pacman &>/dev/null; then
+            sudo pacman -S --noconfirm "${MISSING_TOOLS[@]}" || true
+        else
+            echo "Package manager not recognized. Skipping automatic installation."
+        fi
+    fi
+fi
+
+if command -v pv &>/dev/null && command -v whiptail &>/dev/null; then
+    USE_PROGRESS_UI=true
+    echo "Progress indicators enabled (pv + whiptail)."
+else
+    echo "Falling back to standard output / simple progress logs."
+fi
+echo ""
+
+# ---------------------------------------------------------
 # Phase 1: Mode Selection
 # ---------------------------------------------------------
 read -p "Do you want to (W)rite a new OS image or (I)nject config to an existing drive? [W/I]: " MODE
@@ -153,15 +193,39 @@ if [[ "$MODE" =~ ^[Ww] ]]; then
         DOWNLOAD_DIR="$PWD/pi_downloads"
         mkdir -p "$DOWNLOAD_DIR"
         echo "Downloading to $DOWNLOAD_DIR..."
-        wget -q --show-progress --trust-server-names -P "$DOWNLOAD_DIR" "$URL"
-        IMG_PATH=$(ls -t "$DOWNLOAD_DIR"/*.xz | head -n 1)
+        if [ "$USE_PROGRESS_UI" = true ]; then
+            # Get remote filename / size via HTTP headers
+            REMOTE_HEADERS=$(wget --spider --server-response "$URL" 2>&1)
+            REDIRECT_URL=$(echo "$REMOTE_HEADERS" | grep -i "Location:" | tail -n 1 | awk '{print $2}' | tr -d '\r')
+            if [ -n "$REDIRECT_URL" ]; then
+                FILE_NAME=$(basename "$REDIRECT_URL" | cut -d'?' -f1)
+            else
+                FILE_NAME="pi_os_image.xz"
+            fi
+            CONTENT_LENGTH=$(echo "$REMOTE_HEADERS" | grep -i "Content-Length:" | tail -n 1 | awk '{print $2}' | tr -d '\r')
+
+            OUT_FILE="$DOWNLOAD_DIR/$FILE_NAME"
+            if [ -n "$CONTENT_LENGTH" ] && [[ "$CONTENT_LENGTH" =~ ^[0-9]+$ ]]; then
+                ( wget -qO- "$URL" | pv -n -s "$CONTENT_LENGTH" > "$OUT_FILE" ) 2>&1 | whiptail --gauge "Downloading Raspberry Pi OS image..." 6 60 0
+            else
+                ( wget -qO- "$URL" | pv -n > "$OUT_FILE" ) 2>&1 | whiptail --gauge "Downloading Raspberry Pi OS image..." 6 60 0
+            fi
+            IMG_PATH="$OUT_FILE"
+        else
+            wget -q --show-progress --trust-server-names -P "$DOWNLOAD_DIR" "$URL"
+            IMG_PATH=$(ls -t "$DOWNLOAD_DIR"/*.xz | head -n 1)
+        fi
     fi
 
     echo "Unmounting any active partition mounts on $TARGET_PATH..."
     sudo umount "${TARGET_PATH}"* 2>/dev/null || true
 
     echo "Writing image to $TARGET_PATH..."
-    xzcat "$IMG_PATH" | sudo dd of="$TARGET_PATH" bs=4M status=progress conv=fsync
+    if [ "$USE_PROGRESS_UI" = true ]; then
+        ( pv -n "$IMG_PATH" | xzcat | sudo dd of="$TARGET_PATH" bs=4M conv=fsync ) 2>&1 | whiptail --gauge "Writing image to $TARGET_PATH..." 6 60 0
+    else
+        xzcat "$IMG_PATH" | sudo dd of="$TARGET_PATH" bs=4M status=progress conv=fsync
+    fi
 
     echo "Waiting for partition table writing to settle..."
     sleep 2
