@@ -309,14 +309,20 @@ if [ -f /etc/hosts ]; then
     sed -i "s/127\.0\.1\.1.*/127.0.1.1\t$RPI_HOSTNAME/g" /etc/hosts
 fi
 
-# Configure Wi-Fi Country Code
-mkdir -p /etc/wpa_supplicant
-cat << WPA_EOF > /etc/wpa_supplicant/wpa_supplicant.conf
-ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
-country=$WIFI_COUNTRY
-WPA_EOF
-rm -f /var/lib/systemd/rfkill/* 2>/dev/null
+# Force NetworkManager wireless state to enabled
+mkdir -p /var/lib/NetworkManager
+cat << EOF_NM > /var/lib/NetworkManager/NetworkManager.state
+[main]
+NetworkingEnabled=true
+WirelessEnabled=true
+WWANEnabled=true
+EOF_NM
+chmod 600 /var/lib/NetworkManager/NetworkManager.state
+
+# Unblock Wi-Fi and set country code natively
+/usr/sbin/rfkill unblock wifi
+/usr/bin/raspi-config nonint do_wifi_country $WIFI_COUNTRY
+/usr/bin/nmcli radio wifi on
 EOF
 
 if [[ "$ENABLE_VNC" =~ ^[Yy] ]]; then
