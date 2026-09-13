@@ -152,8 +152,8 @@ if [[ "$MODE" =~ ^[Ww] ]]; then
     read -p "Selection [1/2/3]: " IMG_CHOICE
 
     case $IMG_CHOICE in
-        1) URL="https://downloads.raspberrypi.com/raspios_lite_arm64/latest" ;;
-        2) URL="https://downloads.raspberrypi.com/raspios_arm64/latest" ;;
+        1) URL="https://downloads.raspberrypi.com/raspios_lite_arm64_latest" ;;
+        2) URL="https://downloads.raspberrypi.com/raspios_arm64_latest" ;;
         3) 
             shopt -s nullglob
             LOCAL_FILES=( *.xz )
