@@ -66,8 +66,30 @@ echo "--- General Configuration ---"
 read -p "New Raspberry Pi Username: " RPI_USER
 read -s -p "New Password: " RPI_PASS
 echo ""
-read -p "New Raspberry Pi Hostname [Default: raspberrypi]: " RPI_HOSTNAME
-RPI_HOSTNAME="${RPI_HOSTNAME:-raspberrypi}"
+read -p "New Raspberry Pi Hostname [Default: raspberrypi]: " RPI_HOSTNAME_INPUT
+if [ -n "$RPI_HOSTNAME_INPUT" ]; then
+    RPI_HOSTNAME="$RPI_HOSTNAME_INPUT"
+    HOTSPOT_SSID="$RPI_HOSTNAME"
+else
+    RPI_HOSTNAME="raspberrypi"
+    read -p "Fallback Wi-Fi Hotspot SSID [Default: Pi5-Setup-AP]: " HOTSPOT_SSID_INPUT
+    HOTSPOT_SSID="${HOTSPOT_SSID_INPUT:-Pi5-Setup-AP}"
+fi
+
+echo "--- Fallback Wi-Fi Hotspot Password ---"
+while true; do
+    read -s -p "Enter Fallback Wi-Fi Hotspot Password (min 8 chars): " HOTSPOT_PASS
+    echo ""
+    read -s -p "Confirm Fallback Wi-Fi Hotspot Password: " HOTSPOT_PASS_CONFIRM
+    echo ""
+    if [ "${#HOTSPOT_PASS}" -lt 8 ]; then
+        echo "Password must be at least 8 characters long for Wi-Fi WPA2. Please try again."
+    elif [ "$HOTSPOT_PASS" != "$HOTSPOT_PASS_CONFIRM" ]; then
+        echo "Passwords do not match. Please try again."
+    else
+        break
+    fi
+done
 
 SSH_PUB_KEY=""
 if [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
@@ -348,13 +370,13 @@ autoconnect=false
 
 [wifi]
 mode=ap
-ssid=Pi5-Setup-AP
+ssid=$HOTSPOT_SSID
 band=bg
 channel=1
 
 [wifi-security]
 key-mgmt=wpa-psk
-psk=RaspberryPi
+psk=$HOTSPOT_PASS
 
 [ipv4]
 method=shared
