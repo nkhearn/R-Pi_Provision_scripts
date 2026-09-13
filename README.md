@@ -16,7 +16,7 @@ All three scripts inject a comprehensive headless configuration into the Raspber
 * **Advanced Multi-Network Wi-Fi (NetworkManager):** Configures multiple Wi-Fi SSIDs with priority tiers and customizable Wi-Fi country codes directly into NetworkManager (`/etc/NetworkManager/system-connections/`).
 * **Pre-seeded NetworkManager State:** Pre-configures `/var/lib/NetworkManager/NetworkManager.state` to ensure wireless and networking radios are enabled on first boot (`NetworkingEnabled=true`, `WirelessEnabled=true`).
 * **Native First-Boot Wi-Fi & Country Unblock:** Injects a one-time `first-boot-wifi.service` that unblocks Wi-Fi via `rfkill unblock wifi` and sets the regulatory domain natively using `raspi-config nonint do_wifi_country`.
-* **Fallback Hotspot AP:** Injects a custom `network-fallback.service`. If the Raspberry Pi cannot reach the internet after 45 seconds, it automatically broadcasts a fallback Wi-Fi Hotspot (`Pi5-Setup-AP`, password: `RaspberryPi`) so you can SSH in.
+* **Fallback Hotspot AP:** Injects a custom `network-fallback.service`. If the Raspberry Pi cannot reach the internet after 45 seconds, it automatically broadcasts a fallback Wi-Fi Hotspot (using the Hostname or custom SSID, with a user-configured password) so you can SSH in.
 * **Optional VNC Enablement:** Prompt-driven option to inject a one-time first-boot service (`first-boot-vnc.service`) that enables the VNC service natively via `raspi-config nonint do_vnc 0`.
 * **Dynamic Progress Indicators:** Checks for `pv` and `whiptail` to display visual progress gauges during download, extraction, writing, and compression, with an option to install them automatically or fall back to standard console output.
 
