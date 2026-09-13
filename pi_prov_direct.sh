@@ -402,14 +402,43 @@ if [ -f "$MNT_ROOT/etc/hosts" ]; then
 fi
 echo "Hostname configured as: $RPI_HOSTNAME"
 
-sudo mkdir -p "$MNT_ROOT/etc/wpa_supplicant"
-sudo tee "$MNT_ROOT/etc/wpa_supplicant/wpa_supplicant.conf" > /dev/null <<EOF
-ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
-country=$WIFI_COUNTRY
+# Force NetworkManager to enable wireless radios on boot
+echo "Forcing NetworkManager wireless state to enabled..."
+sudo mkdir -p "$MNT_ROOT/var/lib/NetworkManager"
+sudo tee "$MNT_ROOT/var/lib/NetworkManager/NetworkManager.state" > /dev/null <<EOF
+[main]
+NetworkingEnabled=true
+WirelessEnabled=true
+WWANEnabled=true
 EOF
-sudo rm -f "$MNT_ROOT/var/lib/systemd/rfkill/"*
-echo "Wi-Fi soft-block cleared and country code set to $WIFI_COUNTRY."
+sudo chmod 600 "$MNT_ROOT/var/lib/NetworkManager/NetworkManager.state"
+
+# Create a one-time service to unblock rfkill and set the regulatory domain natively
+echo "Injecting first-boot Wi-Fi unblock service..."
+sudo tee "$MNT_ROOT/etc/systemd/system/first-boot-wifi.service" > /dev/null <<EOF
+[Unit]
+Description=Unblock Wi-Fi and Set Country on First Boot
+After=multi-user.target NetworkManager.service
+
+[Service]
+Type=oneshot
+# 1. Remove the kernel-level soft block
+ExecStartPre=/usr/sbin/rfkill unblock wifi
+# 2. Register the country code using the native Pi tool
+ExecStart=/usr/bin/raspi-config nonint do_wifi_country ${WIFI_COUNTRY}
+# 3. Ensure NetworkManager radio is on
+ExecStartPost=/usr/bin/nmcli radio wifi on
+# 4. Remove the service so it never runs again
+ExecStartPost=/bin/systemctl disable first-boot-wifi.service
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable the service for the first boot
+sudo mkdir -p "$MNT_ROOT/etc/systemd/system/multi-user.target.wants"
+sudo ln -sf "/etc/systemd/system/first-boot-wifi.service" "$MNT_ROOT/etc/systemd/system/multi-user.target.wants/first-boot-wifi.service"
 
 if [ -n "$SSH_PUB_KEY" ]; then
     sudo mkdir -p "$MNT_ROOT/home/$RPI_USER/.ssh"
